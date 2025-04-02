@@ -13,6 +13,10 @@ MIN_EXPERT_CAPACITY = 4
 
 
 def default(val, default_val):
+    """
+    Returns the default value if the provided value is None.
+    Handles cases where the default value is a function.
+    """
     default_val = (
         default_val() if isfunction(default_val) else default_val
     )
@@ -20,6 +24,9 @@ def default(val, default_val):
 
 
 def cast_tuple(el):
+    """
+    Casts an element to a tuple if it's not already one.
+    """
     return el if isinstance(el, tuple) else (el,)
 
 
@@ -27,12 +34,18 @@ def cast_tuple(el):
 
 
 def top1(t):
+    """
+    Retrieves the top-1 value and index from the last dimension of a tensor.
+    """
     values, index = t.topk(k=1, dim=-1)
     values, index = map(lambda x: x.squeeze(dim=-1), (values, index))
     return values, index
 
 
 def cumsum_exclusive(t, dim=-1):
+    """
+    Computes the exclusive cumulative sum of a tensor along a given dimension.
+    """
     len(t.shape)
     num_pad_dims = -dim - 1
     pre_padding = (0, 0) * num_pad_dims
@@ -44,6 +57,10 @@ def cumsum_exclusive(t, dim=-1):
 # pytorch one hot throws an error if there are out of bound indices.
 # tensorflow, in contrast, does not throw an error
 def safe_one_hot(indexes, max_length):
+    """
+    Performs one-hot encoding safely, avoiding errors for out-of-bounds indices
+    by ensuring the encoding size is large enough and then slicing.
+    """
     max_index = indexes.max() + 1
     return F.one_hot(indexes, max(max_index + 1, max_length))[
         ..., :max_length
@@ -51,6 +68,10 @@ def safe_one_hot(indexes, max_length):
 
 
 def init_(t):
+    """
+    Initializes a tensor with values drawn from a uniform distribution,
+    scaled according to the tensor's last dimension size.
+    """
     dim = t.shape[-1]
     std = 1 / math.sqrt(dim)
     return t.uniform_(-std, std)
@@ -60,6 +81,10 @@ def init_(t):
 
 
 class GELU_(nn.Module):
+    """
+    Custom implementation of the Gaussian Error Linear Unit (GELU) activation function.
+    Used as a fallback if nn.GELU is not available.
+    """
     def forward(self, x):
         return (
             0.5
@@ -80,6 +105,10 @@ GELU = nn.GELU if hasattr(nn, "GELU") else GELU_
 
 
 class Experts(nn.Module):
+    """
+    A module representing a set of expert networks in a Mixture of Experts model.
+    Each expert is typically a simple feed-forward network.
+    """
     def __init__(
         self, dim, num_experts=16, hidden_dim=None, activation=GELU
     ):
@@ -99,6 +128,12 @@ class Experts(nn.Module):
         self.act = activation()
 
     def forward(self, x):
+        """
+        Processes input `x` through all experts in parallel.
+        Input `x` is expected to have dimensions compatible with expert weights,
+        typically [..., num_tokens, dim].
+        Output has the same shape as input `x`.
+        """
         hidden = torch.einsum("...nd,...dh->...nh", x, self.w1)
         hidden = self.act(hidden)
         out = torch.einsum("...nh,...hd->...nd", hidden, self.w2)
@@ -109,9 +144,13 @@ class Experts(nn.Module):
 # https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/models/research/moe.py
 
 # gating network
-
-
 class Top2Gating(nn.Module):
+    """
+    Implements the Top-2 Gating mechanism for Mixture of Experts.
+    It selects the top 2 experts for each token based on gating scores,
+    computes assignment probabilities, and calculates a load balancing loss.
+    Supports different policies for selecting the second expert during training/evaluation.
+    """
     def __init__(
         self,
         dim,
@@ -141,6 +180,20 @@ class Top2Gating(nn.Module):
         self.capacity_factor_eval = capacity_factor_eval
 
     def forward(self, x, importance=None):
+        """
+        Computes gating decisions for the input tensor `x`.
+
+        Args:
+            x: Input tensor of shape [..., batch_size, group_size, dim].
+            importance: Optional tensor adjust scores, used in hierarchical MoE.
+
+        Returns:
+            dispatch_tensor: A boolean tensor indicating which token goes to which expert's buffer slot.
+                             Shape [batch_size, group_size, num_experts, expert_capacity].
+            combine_tensor: A float tensor containing the probabilities for combining expert outputs.
+                            Shape [batch_size, group_size, num_experts, expert_capacity].
+            loss: The load balancing loss.
+        """
         *_, b, group_size, dim = x.shape
         num_gates = self.num_gates
 
@@ -278,6 +331,10 @@ class Top2Gating(nn.Module):
 
 
 class MoE(nn.Module):
+    """
+    Implements a standard Mixture of Experts (MoE) layer.
+    It uses a Top-2 Gating mechanism to route tokens to experts and combines their outputs.
+    """
     def __init__(
         self,
         dim,
@@ -320,6 +377,18 @@ class MoE(nn.Module):
         self.loss_coef = loss_coef
 
     def forward(self, inputs, **kwargs):
+        """
+        Processes the input tensor through the MoE layer.
+
+        Args:
+            inputs: Input tensor of shape [batch_size, sequence_length, dim].
+            **kwargs: Additional arguments (currently unused).
+
+        Returns:
+            output: The output tensor after processing by selected experts,
+                    shape [batch_size, sequence_length, dim].
+            loss: The load balancing loss scaled by `loss_coef`.
+        """
         b, n, d, e = *inputs.shape, self.num_experts
         dispatch_tensor, combine_tensor, loss = self.gate(inputs)
         expert_inputs = torch.einsum(
@@ -342,6 +411,11 @@ class MoE(nn.Module):
 
 
 class HeirarchicalMoE(nn.Module):
+    """
+    Implements a 2-level Hierarchical Mixture of Experts (HMoE) layer.
+    It uses two levels of Top-2 Gating: an outer gate routes tokens to groups of experts,
+    and inner gates route tokens within each selected group.
+    """
     def __init__(
         self,
         dim,
@@ -397,6 +471,19 @@ class HeirarchicalMoE(nn.Module):
         self.loss_coef = loss_coef
 
     def forward(self, inputs, **kwargs):
+        """
+        Processes the input tensor through the HMoE layer.
+
+        Args:
+            inputs: Input tensor of shape [batch_size, sequence_length, dim].
+            **kwargs: Additional arguments (currently unused).
+
+        Returns:
+            output: The output tensor after processing by selected experts,
+                    shape [batch_size, sequence_length, dim].
+            loss: The combined load balancing loss from both gating levels,
+                  scaled by `loss_coef`.
+        """
         b, n, d, eo, ei = (
             *inputs.shape,
             self.num_experts_outer,
