@@ -1,6 +1,88 @@
 # Jamba
 PyTorch Implementation of Jamba: "Jamba: A Hybrid Transformer-Mamba Language Model"
 
+## Native uv Python and package management
+
+### 1. Install uv
+
+Uv can be installed as follows, depending on your operating system.
+
+**macOS and Linux**
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+or
+
+```bash
+wget -qO- https://astral.sh/uv/install.sh | sh
+```
+
+> **Note:**
+> For more installation options, please refer to the official [uv documentation](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer).
+
+### 2. Install Python packages and dependencies
+
+Recommended to use Python 3.12 or 3.13
+```bash
+uv venv --python 3.12
+```
+
+After that do
+```bash
+source .venv/bin/activate
+```
+
+Install dependencies from requirements.txt
+```bash
+uv run python -m pip install -U -r requirements.txt
+```
+
+You can install new packages, that are not specified in the `pyproject.toml` via `uv add`, for example:
+
+```bash
+uv add packaging
+```
+
+And you can remove packages via `uOn Windows (PowerShell):
+
+```bash
+.venv\Scripts\activate
+```
+
+uv remove packaging
+```
+
+## Train
+
+```bash
+uv run python train.py
+```
+
+
+**Skipping the `uv run` command**
+
+If you find typing `uv run` cumbersome, you can manually activate the virtual environment as described below.
+
+On macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Then, you can run scripts via
+
+```bash
+python script.py
+```
+
+and launch JupyterLab via
+
+```bash
+jupyter lab
+```
+
 
 ## Usage
 
@@ -43,9 +125,6 @@ output = model(x)
 print(output)
 
 ```
-
-## Train
-`python3 train.py`
 
 
 # License
